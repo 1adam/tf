@@ -22,6 +22,13 @@ def verify_msg( incMsg ):
             return False
     return True
 
+def inst_exist_by_name( instName ):
+    ec2_exist = boto3.resource('ec2').instances.filter(
+      Filters=[{'Name': 'instance-state-name', 'Values': ['running'] }, {'Name': 'tag:Name', 'Values': [ instName ] } ])
+    for inst_exist in ec2_exist:
+        return instName
+    return False
+
 def parse_msg( incMsg ):
     types_map = {
         'simple-dev': 't3.nano',
@@ -32,9 +39,9 @@ def parse_msg( incMsg ):
     instType = types_map[ incMsg['type'] ]
     deployEnv = incMsg['environment']
 
-    ec2_exist = boto3.resource('ec2').instances.filter(
-      Filters=[{'Name': 'instance-state-name', 'Values': ['running'] }, {'Name': 'tag:Name', 'Values': [deployEnv + "_" + madeBy]} ])
-    for inst_exist in ec2_exist:
+    ec2_exist = inst_exist_by_name( deployEnv+'_'+madeBy )
+
+    if ec2_exist == deployEnv+'_'+madeBy:
         print('found existing vm called ', deployEnv+"_"+madeBy)
         return 2
 
@@ -54,15 +61,22 @@ def parse_msg( incMsg ):
             ]
         }]
     )
-
+    return 0
 
 def proc_new_msg(event, context):
 
+    retCodeMsgMap = [
+      'OK',
+      'NOT_OK',
+      'OK_EXISTS'
+    ]
+
     for msg in event['Records']:
+        retCode = 0
         msg_body = json.loads(msg['body'])
         if verify_msg(msg_body) == False:
             return {
-                'statusCode': '502',
+                'statusCode': '400',
                 'msg': 'Invalid Message'
             }
         print('---------------------------------------------')
@@ -72,9 +86,13 @@ def proc_new_msg(event, context):
         print('In environment: ' + msg_body['environment'])
         print('---------------------------------------------')
 
-        parse_msg(msg_body)
+        retCode = parse_msg(msg_body)
+
+        if retCode != 0:
+          print('Error number {0}'.format(retCode) )
+          return { 'statusCode': 200, 'msg': retCodeMsgMap[retCode] }
 
     return {
         'statusCode': 200,
-        'msg': 'OK'
+        'msg': retCodeMsgMap[retCode]
     }
