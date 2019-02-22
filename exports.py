@@ -1,5 +1,6 @@
 from __future__ import print_function
 import json, boto3
+from botocore.exceptions import ClientError
 
 def find_latest_bionic_ami():
   client = boto3.client('ec2')
@@ -15,11 +16,21 @@ def find_latest_bionic_ami():
     return final[0]['ImageId']
 
 def verify_msg( incMsg ):
-    for field in ["creator_name","type","environment"]:
-        try:
-            incMsg[field]
-        except:
-            return False
+    valid_fields = ['creator_name','type','environment']
+    valid_values = {
+      'creator_name': [ '1adam' ],
+      'type': ['simple-dev','simple-stg'],
+      'environment': ['dev','stg']
+    }
+
+    for field in valid_fields:
+      try:
+          incMsg[field]
+      except:
+          return False
+      else:
+        if incMsg[field] not in valid_values[field]:
+          return False
     return True
 
 def inst_exist_by_name( instName ):
@@ -30,13 +41,13 @@ def inst_exist_by_name( instName ):
     return False
 
 def parse_msg( incMsg ):
-    types_map = {
-        'simple-dev': 't3.nano',
-        'big-dev': 't3.small'
+    inst_types_map = {
+      'simple-dev': 't3.nano',
+      'simple-stg': 't3.nano'
     }
 
     madeBy = incMsg['creator_name']
-    instType = types_map[ incMsg['type'] ]
+    instType = inst_types_map[ incMsg['type'] ]
     deployEnv = incMsg['environment']
 
     ec2_exist = inst_exist_by_name( deployEnv+'_'+madeBy )
@@ -47,19 +58,52 @@ def parse_msg( incMsg ):
 
     ec2_inst = boto3.client('ec2')
 
+    try:
+      ec2_kp = ec2_inst.create_key_pair( KeyName="devbot-key-"+deployEnv )
+    except ClientError as e:
+      if "InvalidKeyPair.Duplicate" in e.message:
+        pass
+      else:
+        raise
+    else:
+      print(ec2_kp)
+
+    subnets = ec2_inst.describe_subnets(
+      Filters=[{
+          'Name': 'tag:Name',
+          'Values': [deployEnv+"-pub-sub"]
+        }])
+
+    secgroups = ec2_inst.describe_security_groups(
+      Filters=[{
+        'Name': 'group-name',
+        'Values': [ 'allow-ssh-'+deployEnv ]
+      }])
+
     latest_bionic_ami = find_latest_bionic_ami()
+
+    custUserData = '''#!/bin/bash
+git clone https://github.com/1adam/spinup.git
+find /spinup/bashing -type f -name "*.sh" -exec chmod 755 '{}' \;
+/spinup/bashing/devbot-%s.sh 2>&1 > /devbot-spinup.log\
+''' % (deployEnv)
 
     resp = ec2_inst.run_instances(
         ImageId=latest_bionic_ami,
         InstanceType=instType,
         MaxCount=1,
         MinCount=1,
+        KeyName='devbot-key-'+deployEnv,
         TagSpecifications=[{
             'ResourceType': 'instance',
             'Tags': [
-                {"Key": "Name", "Value": deployEnv+"_"+madeBy }
+                {"Key": "Name", "Value": deployEnv+"_"+madeBy },
+                {"Key": "Creator", "Value": madeBy }
             ]
-        }]
+        }],
+        SubnetId=subnets['Subnets'][0]['SubnetId'],
+        SecurityGroupIds=[secgroups['SecurityGroups'][0]['GroupId']],
+        UserData=custUserData
     )
     return 0
 
@@ -75,6 +119,7 @@ def proc_new_msg(event, context):
         retCode = 0
         msg_body = json.loads(msg['body'])
         if verify_msg(msg_body) == False:
+            print('Invalid Message')
             return {
                 'statusCode': '400',
                 'msg': 'Invalid Message'
@@ -92,7 +137,9 @@ def proc_new_msg(event, context):
           print('Error number {0}'.format(retCode) )
           return { 'statusCode': 200, 'msg': retCodeMsgMap[retCode] }
 
-    return {
+    finalResult = {
         'statusCode': 200,
         'msg': retCodeMsgMap[retCode]
     }
+    print(finalResult)
+    return finalResult

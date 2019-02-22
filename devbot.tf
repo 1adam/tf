@@ -2,6 +2,113 @@ provider "aws" {
   region  = "us-east-1"
 }
 
+
+resource "aws_vpc" "devbot-vpc" {
+  cidr_block            = "10.100.0.0/16"
+  enable_dns_support    = true
+  enable_dns_hostnames  = true
+  tags = {
+    Name = "devbot-vpc"
+  }
+}
+
+resource "aws_internet_gateway" "igw01" {
+  vpc_id  = "${aws_vpc.devbot-vpc.id}"
+  tags = {
+    Name = "igw01"
+  }
+}
+
+resource "aws_route" "devbot-route" {
+  route_table_id  = "${aws_route_table.devbot-rt.id}"
+  destination_cidr_block = "0.0.0.0/0"
+  gateway_id = "${aws_internet_gateway.igw01.id}"
+}
+
+resource "aws_route_table" "devbot-rt" {
+  vpc_id = "${aws_vpc.devbot-vpc.id}"
+}
+
+resource "aws_route_table_association" "aws-rta-devbot-dev" {
+  subnet_id = "${aws_subnet.dev-pub-sub.id}"
+  route_table_id = "${aws_route_table.devbot-rt.id}"
+}
+
+resource "aws_route_table_association" "aws-rta-devbot-stg" {
+  subnet_id = "${aws_subnet.stg-pub-sub.id}"
+  route_table_id = "${aws_route_table.devbot-rt.id}"
+}
+resource "aws_route_table_association" "aws-rta-devbot-prod" {
+  subnet_id = "${aws_subnet.prod-pub-sub.id}"
+  route_table_id = "${aws_route_table.devbot-rt.id}"
+}
+resource "aws_subnet" "prod-pub-sub" {
+  vpc_id      = "${aws_vpc.devbot-vpc.id}"
+  cidr_block  = "10.100.10.0/24"
+  map_public_ip_on_launch = true
+  tags = {
+    Name  = "prod-pub-sub"
+  }
+}
+
+resource "aws_subnet" "stg-pub-sub" {
+  vpc_id      = "${aws_vpc.devbot-vpc.id}"
+  cidr_block  = "10.100.98.0/24"
+  map_public_ip_on_launch = true
+  tags = {
+    Name  = "stg-pub-sub"
+  }
+}
+
+resource "aws_subnet" "dev-pub-sub" {
+  vpc_id      = "${aws_vpc.devbot-vpc.id}"
+  cidr_block  = "10.100.99.0/24"
+  map_public_ip_on_launch = true
+  tags = {
+    Name  = "dev-pub-sub"
+  }
+}
+
+resource "aws_security_group" "allow_ssh_dev" {
+  name  = "allow-ssh-dev"
+  description = "allow ssh from everywhere to dev machines"
+  vpc_id  = "${aws_vpc.devbot-vpc.id}"
+
+  ingress {
+    from_port = 22
+    to_port = 22
+    protocol  = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_security_group" "allow_ssh_stg" {
+  name  = "allow-ssh-stg"
+  description = "allow ssh from everywhere to stg machines"
+  vpc_id  = "${aws_vpc.devbot-vpc.id}"
+
+  ingress {
+    from_port = 22
+    to_port = 22
+    protocol  = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_security_group" "allow_ssh_prod" {
+  name  = "allow-ssh-prod"
+  description = "allow ssh from everywhere to prod machines"
+  vpc_id  = "${aws_vpc.devbot-vpc.id}"
+
+  ingress {
+    from_port = 22
+    to_port = 22
+    protocol  = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+
 resource "aws_sqs_queue" "devbot-queue" {
   name_prefix  = "devbot-proc-queue"
   delay_seconds = 0
@@ -39,6 +146,7 @@ resource "aws_lambda_function" "proc_new_msg" {
   runtime       = "python2.7"
   timeout       = 30
   depends_on    = ["aws_iam_role.devbot_lambda_role"]
+  memory_size   = 128
 }
 
 resource "aws_cloudwatch_log_group" "devbot_lambda_log" {
