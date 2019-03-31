@@ -2,7 +2,6 @@ provider "aws" {
   region  = "us-east-1"
 }
 
-
 resource "aws_vpc" "devbot-vpc" {
   cidr_block            = "10.100.0.0/16"
   enable_dns_support    = true
@@ -19,14 +18,31 @@ resource "aws_internet_gateway" "igw01" {
   }
 }
 
-resource "aws_route" "devbot-route" {
-  route_table_id  = "${aws_route_table.devbot-rt.id}"
-  destination_cidr_block = "0.0.0.0/0"
-  gateway_id = "${aws_internet_gateway.igw01.id}"
+resource "aws_kms_key" "devbot-key" {
+  description = "to encrypt devbot s3 brain"
+}
+
+resource "aws_s3_bucket" "devbot-coord" {
+  bucket_prefix = "devbot-coord-"
+  acl = "private"
+  server_side_encryption_configuration {
+    rule {
+      apply_server_side_encryption_by_default {
+        kms_master_key_id = "${aws_kms_key.devbot-key.arn}"
+        sse_algorithm = "aws:kms"
+      }
+    }
+  }
 }
 
 resource "aws_route_table" "devbot-rt" {
   vpc_id = "${aws_vpc.devbot-vpc.id}"
+}
+
+resource "aws_route" "devbot-route" {
+  route_table_id          = "${aws_route_table.devbot-rt.id}"
+  destination_cidr_block  = "0.0.0.0/0"
+  gateway_id              = "${aws_internet_gateway.igw01.id}"
 }
 
 resource "aws_route_table_association" "aws-rta-devbot-dev" {
@@ -80,6 +96,12 @@ resource "aws_security_group" "allow_ssh_dev" {
     protocol  = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
+  egress {
+    cidr_blocks = ["0.0.0.0/0"]
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+  }
 }
 
 resource "aws_security_group" "allow_ssh_stg" {
@@ -93,6 +115,12 @@ resource "aws_security_group" "allow_ssh_stg" {
     protocol  = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
+  egress {
+    cidr_blocks = ["0.0.0.0/0"]
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+  }
 }
 
 resource "aws_security_group" "allow_ssh_prod" {
@@ -105,6 +133,12 @@ resource "aws_security_group" "allow_ssh_prod" {
     to_port = 22
     protocol  = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
+  }
+  egress {
+    cidr_blocks = ["0.0.0.0/0"]
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
   }
 }
 
@@ -147,6 +181,11 @@ resource "aws_lambda_function" "proc_new_msg" {
   timeout       = 30
   depends_on    = ["aws_iam_role.devbot_lambda_role"]
   memory_size   = 128
+  environment {
+    variables = {
+      BRAINBUCKET = "${aws_s3_bucket.devbot-coord.arn}"
+    }
+  }
 }
 
 resource "aws_cloudwatch_log_group" "devbot_lambda_log" {

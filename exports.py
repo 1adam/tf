@@ -1,5 +1,5 @@
 from __future__ import print_function
-import json, boto3
+import json, boto3, os
 from botocore.exceptions import ClientError
 
 def find_latest_bionic_ami():
@@ -114,6 +114,8 @@ def proc_new_msg(event, context):
       'NOT_OK',
       'OK_EXISTS'
     ]
+
+    print(os.environ['BRAINBUCKET'])
 
     for msg in event['Records']:
         retCode = 0
